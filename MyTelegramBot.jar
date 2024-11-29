@@ -1,0 +1,78 @@
+//Импорт библиотеки
+package org.example;
+import org.telegram.telegrambots.bots.TelegramLongPollingBot;
+import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
+import java.io.IOException;
+//Делаем класс
+public class MyTelegramBot extends TelegramLongPollingBot {
+
+    private final String BOT_USERNAME = "@test_rekikol_bot";//username бота
+    private final String BOT_TOKEN = "6804594259:AAEu03onfNbMDd4HmS9-QvuWcOqxLfQl--I";//Токен бота
+
+    @Override
+    public String getBotUsername() {
+        return BOT_USERNAME;
+    }
+
+    @Override
+    public String getBotToken() {
+        return BOT_TOKEN;
+    }
+
+    private String[] getExchangeRate(String currencyPair) {// Парсинг курса
+        String url = "https://ru.investing.com/currencies/" + currencyPair.toLowerCase();
+        String[] result = new String[2];
+        try {
+            Document doc = Jsoup.connect(url).get();
+            Elements priceElements = doc.select("div[data-test=instrument-price-last]");
+            Elements percentChangeElements = doc.select("span[data-test=instrument-price-change-percent]");
+
+            result[0] = priceElements.size() > 0 ? priceElements.get(0).text() : "Курс не найден";
+            result[1] = percentChangeElements.size() > 0 ? percentChangeElements.get(0).text() : "Изменение не найдено";
+            return result;
+        } catch (IOException e) {
+            result[0] = "Ошибка загрузки страницы: " + e.getMessage();
+            result[1] = "Ошибка";
+            return result;
+        }
+    }
+
+    @Override
+    public void onUpdateReceived(Update update) {// Обработка обновлений
+        if (update.hasMessage() && update.getMessage().hasText()) {
+            String messageText = update.getMessage().getText().toLowerCase();
+            long chatId = update.getMessage().getChatId();
+
+            if (messageText.equals("/usd") || messageText.equals("доллар")) {
+                String[] rate = getExchangeRate("usd-rub");
+                sendMessage(chatId, "Курс USD/RUB: " + rate[0] + "\nИзменение: " + rate[1]);
+            } else if (messageText.equals("/eur") || messageText.equals("евро")) {
+                String[] rate = getExchangeRate("eur-rub");
+                sendMessage(chatId, "Курс EUR/RUB: " + rate[0] + "\nИзменение: " + rate[1]);
+            } else if (messageText.equals("/start")) {
+                sendMessage(chatId, "👋Привет я бот для просмотра курса 💲 и 💶");
+            } else if (messageText.equals("/help") || messageText.equals("помощь")) {
+                sendMessage(chatId, "(●'◡'●)Доступные команды:\n/usd - курс USD/RUB✌️\n/eur - курс EUR/RUB✌️");
+            } else {
+                sendMessage(chatId, "🤷‍♀️Неизвестная команда. Используйте /help для справки🤷‍♂️");
+            }
+        }
+    }
+
+    private void sendMessage(long chatId, String text) {// Отправка сообщения
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText(text);
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+}
