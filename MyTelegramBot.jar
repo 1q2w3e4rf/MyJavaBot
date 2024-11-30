@@ -14,8 +14,8 @@ import java.util.Timer;
 import java.util.TimerTask;
 
 public class MyTelegramBot extends TelegramLongPollingBot {
-    private final String BOT_USERNAME = "@test_rekikol_bot";
-    private final String BOT_TOKEN = "6804594259:AAEu03onfNbMDd4HmS9-QvuWcOqxLfQl--I";
+    private final String BOT_USERNAME = "";
+    private final String BOT_TOKEN = "";
 
     private HashMap<Long, TrackingData> trackingData = new HashMap<>(); // Хранение данных отслеживания
 
@@ -132,7 +132,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                 // Вызываем функцию для проверки и отправки обновлений
                 checkAndSendUpdate(chatId);
             }
-        }, 0, 6000); // Запускаем задачу немедленно (0) и повторяем каждые 6000 мс (6 секунд)
+        }, 0, 60000); // Запускаем задачу немедленно (0) и повторяем каждые 6000 мс (6 секунд)
         // Отправляем сообщение о запуске отслеживания
         sendMessage(chatId, "Отслеживание курса USD/RUB и EUR/RUB запущено!");
     }
