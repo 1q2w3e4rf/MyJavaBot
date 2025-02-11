@@ -9,15 +9,13 @@ import org.jsoup.nodes.Document;
 import org.jsoup.select.Elements;
 
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.Timer;
-import java.util.TimerTask;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MyTelegramBot extends TelegramLongPollingBot {
     private final String BOT_USERNAME = "";
     private final String BOT_TOKEN = "";
-
-    private HashMap<Long, TrackingData> trackingData = new HashMap<>(); // Хранение данных отслеживания
+    private static final int UPDATE_INTERVAL = 60 * 1000; // 60 секунд
 
     @Override
     public String getBotUsername() {
@@ -30,24 +28,17 @@ public class MyTelegramBot extends TelegramLongPollingBot {
     }
 
     private String[] getExchangeRate(String currencyPair) {
-        // URL страницы с курсом валюты
         String url = "https://ru.investing.com/currencies/" + currencyPair.toLowerCase();
-        // Массив для хранения результата: курс и процентное изменение
         String[] result = new String[2];
         try {
-            // Подключаемся к странице и парсим HTML с помощью Jsoup
             Document doc = Jsoup.connect(url).get();
-            // Выбираем элементы с помощью CSS-селекторов
             Elements priceElements = doc.select("div[data-test=instrument-price-last]");
             Elements percentChangeElements = doc.select("span[data-test=instrument-price-change-percent]");
 
-            // Извлекаем курс и процентное изменение, если элементы найдены
             result[0] = priceElements.size() > 0 ? priceElements.get(0).text() : "Курс не найден";
             result[1] = percentChangeElements.size() > 0 ? percentChangeElements.get(0).text() : "Изменение не найдено";
-            // Возвращаем результат
             return result;
         } catch (IOException e) {
-            // Обработка ошибки ввода-вывода (например, проблемы с подключением к сети)
             result[0] = "Ошибка загрузки страницы: " + e.getMessage();
             result[1] = "Ошибка";
             return result;
@@ -55,50 +46,43 @@ public class MyTelegramBot extends TelegramLongPollingBot {
     }
 
 
+
+    private void handleCurrency(long chatId, String currencyPair) {
+        String[] rate = getExchangeRate(currencyPair);
+        if (rate != null && rate.length >= 2) {
+            if (rate[0].toLowerCase().contains("ошибка") || rate[0].toLowerCase().contains("404") || rate[1].toLowerCase().contains("ошибка") || rate[1].toLowerCase().contains("404")) {
+                sendMessage(chatId, "Извините, нету курса для " + currencyPair);
+            } else {
+                sendMessage(chatId, "Курс " + currencyPair.toUpperCase() + ": " + rate[0] + "\nИзменение: " + rate[1] + "\n😇");
+            }
+        }else {
+            sendMessage(chatId, "Извините, нету курса для " + currencyPair);
+        }
+    }
+
     @Override
     public void onUpdateReceived(Update update) {
-        // Проверяем, содержит ли обновление сообщение и есть ли в сообщении текст
         if (update.hasMessage() && update.getMessage().hasText()) {
-            // Преобразуем текст сообщения в нижний регистр
             String messageText = update.getMessage().getText().toLowerCase();
-            // Получаем ID чата
             long chatId = update.getMessage().getChatId();
-
-            // Обработка команд:
-            //Проверяем, соответствует ли сообщение одной из команд.  Обратите внимание на ошибку в логике ниже.
-            if (messageText.equals("/usd") || messageText.equals("доллар")) { // Используем || (ИЛИ), а не && (И)
-                String[] rate = getExchangeRate("usd-rub");
-                sendMessage(chatId, "Курс USD/RUB: " + rate[0] + "\nИзменение: " + rate[1] + "\n😇");
-            } else if (messageText.equals("/kzt") || messageText.equals("тенге")) {
-                String[] rate = getExchangeRate("kzt-rub");
-                sendMessage(chatId, "Курс KZT/RUB: " + rate[0] + "\nИзменение: " + rate[1] + "\n😇");
-            } else if (messageText.equals("/jpy") || messageText.equals("иена")) {
-                String[] rate = getExchangeRate("jpy-rub");
-                sendMessage(chatId, "Курс JPY/RUB: " + rate[0] + "\nИзменение: " + rate[1] + "\n😇");
-            } else if (messageText.equals("/eur") || messageText.equals("евро")) {
-                String[] rate = getExchangeRate("eur-rub");
-                sendMessage(chatId, "Курс EUR/RUB: " + rate[0] + "\nИзменение: " + rate[1] + "\n😇");
-            } else if (messageText.equals("/cny") || messageText.equals("юань")) {
-                String[] rate = getExchangeRate("cny-rub");
-                sendMessage(chatId, "Курс CNY/RUB: " + rate[0] + "\nИзменение: " + rate[1] + "\n😇");
-            } else if (messageText.equals("/start")) { // Команда /start
+            if (messageText.equals("/usd") || messageText.equals("доллар")) {
+                handleCurrency(chatId, "usd-rub");
+            } else if (messageText.equals("/start")) {
                 sendMessage(chatId, "👋Привет я бот для просмотра курса 💲 и 💶");
-            } else if (messageText.equals("/help") || messageText.equals("помощь")) { // Команда /help или "помощь"
-                sendMessage(chatId, "(●'◡'●)Доступные команды:\n/usd - курс USD/RUB✌️\n/eur - курс EUR/RUB✌️\n/cny - курс CNY/RUB✌️\n/kzt - курс KZT/RUB✌️\n/jpy - курс JPY/RUB✌️\n/track - отслеживать курс (USD/RUB)\n/stop - остановить отслеживание");
-            } else if (messageText.equals("/track")) { // Команда /track - запуск отслеживания
-                startTracking(chatId);
-            } else if (messageText.equals("/stop")) { // Команда /stop - остановка отслеживания
-                stopTracking(chatId);
-            } else { // Если сообщение не соответствует ни одной из команд
-                String[] rate = getExchangeRate(messageText);
-                if (rate != null && rate.length >= 2) {
-                    // Проверяем наличие слов "ошибка" или "404" в тексте ответа
-                    if (rate[0].toLowerCase().contains("ошибка") || rate[0].toLowerCase().contains("404") || rate[1].toLowerCase().contains("ошибка") || rate[1].toLowerCase().contains("404")) {
-                        sendMessage(chatId, "Извините, нету курса для " + messageText);
-                    } else {
-                        sendMessage(chatId, "Курс " + messageText + ": " + rate[0] + "\nИзменение: " + rate[1] + "\n😇");
-                    }
-                }
+            } else if (messageText.equals("/help") || messageText.equals("помощь")) {
+                sendMessage(chatId, "(●'◡'●)Доступные команды:\n/usd - курс USD/RUB✌️\n/eur - курс EUR/RUB✌️\n/cny - курс CNY/RUB✌️\n/kzt - курс KZT/RUB✌️\n/jpy - курс JPY/RUB✌️\n/track - отслеживать курс (пример: /track usd, eur)\n/stop - остановить отслеживание");
+            } else if (messageText.equals("/kzt") || messageText.equals("тенге")){
+                handleCurrency(chatId, "kzt-rub");
+            } else if (messageText.equals("/jpy") || messageText.equals("иена")) {
+                handleCurrency(chatId, "jpy-rub");
+            } else if (messageText.equals("/eur") || messageText.equals("евро")) {
+                handleCurrency(chatId, "eur-rub");
+            } else if (messageText.equals("/cny") || messageText.equals("юань")) {
+                handleCurrency(chatId, "cny-rub");
+            }
+
+            else {
+                handleCurrency(chatId, messageText);
             }
         }
     }
@@ -113,76 +97,5 @@ public class MyTelegramBot extends TelegramLongPollingBot {
             e.printStackTrace();
         }
     }
-
-    private void startTracking(long chatId) {
-        // Проверяем, запущено ли уже отслеживание для данного чата
-        if (trackingData.containsKey(chatId)) {
-            // Если отслеживание запущено, отправляем сообщение об этом
-            sendMessage(chatId, "Отслеживание уже запущено!");
-            return; // Выходим из функции
-        }
-        // Создаем новые данные для отслеживания и добавляем их в HashMap
-        trackingData.put(chatId, new TrackingData());
-        // Создаем таймер
-        Timer timer = new Timer();
-        // Планируем выполнение задачи с помощью TimerTask
-        timer.scheduleAtFixedRate(new TimerTask() {
-            @Override
-            public void run() {
-                // Вызываем функцию для проверки и отправки обновлений
-                checkAndSendUpdate(chatId);
-            }
-        }, 0, 60000); // Запускаем задачу немедленно (0) и повторяем каждые 6000 мс (6 секунд)
-        // Отправляем сообщение о запуске отслеживания
-        sendMessage(chatId, "Отслеживание курса USD/RUB и EUR/RUB запущено!");
-    }
-
-    private void stopTracking(long chatId) {
-        // Удаляем данные отслеживания для данного чата из HashMap
-        trackingData.remove(chatId);
-        // Отправляем сообщение об остановке отслеживания
-        sendMessage(chatId, "Отслеживание курса остановлено!");
-    }
-
-
-
-    private void checkAndSendUpdate(long chatId) {
-        // Получаем курсы USD/RUB и EUR/RUB
-        String[] usdRate = getExchangeRate("usd-rub");
-        String[] eurRate = getExchangeRate("eur-rub");
-        // Получаем данные отслеживания для данного чата
-        TrackingData data = trackingData.get(chatId);
-
-        // Если данные отслеживания отсутствуют, выходим из функции
-        if (data == null) return;
-
-        // Строка для формирования сообщения
-        String message = "";
-        // Проверяем, изменился ли курс USD/RUB
-        if (!usdRate[0].equals(data.lastUsdRate)) {
-            // Если курс изменился, добавляем информацию в сообщение
-            message += "Курс USD/RUB изменился:\nСтарый курс: " + data.lastUsdRate + "\nНовый курс: " + usdRate[0] + "\nИзменение: " + usdRate[1] + "\n\n";
-            // Обновляем значение старого курса
-            data.lastUsdRate = usdRate[0];
-        }
-        // Проверяем, изменился ли курс EUR/RUB
-        if (!eurRate[0].equals(data.lastEurRate)) {
-            // Если курс изменился, добавляем информацию в сообщение
-            message += "Курс EUR/RUB изменился:\nСтарый курс: " + data.lastEurRate + "\nНовый курс: " + eurRate[0] + "\nИзменение: " + eurRate[1] + "\n";
-            // Обновляем значение старого курса
-            data.lastEurRate = eurRate[0];
-        }
-
-        // Если сообщение не пустое (т.е. курсы изменились), отправляем сообщение
-        if (!message.isEmpty()) {
-            sendMessage(chatId, message);
-        }
-    }
-
-
-
-    private class TrackingData {
-        String lastUsdRate = "";
-        String lastEurRate = "";
-    }
 }
+
