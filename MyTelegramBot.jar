@@ -11,11 +11,27 @@ import org.jsoup.select.Elements;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Random;
 
 public class MyTelegramBot extends TelegramLongPollingBot {
-    private final String BOT_USERNAME = "";
-    private final String BOT_TOKEN = "";
+    private final String BOT_USERNAME = "@currencies_in_java_bot";
+    private final String BOT_TOKEN = "7576863301:AAHGq4CxrdDk6kPS6FOyDo0hBrVH6U3kvTo";
     private static final int UPDATE_INTERVAL = 60 * 1000; // 60 секунд
+    private static final Random random = new Random();
+
+    // Курсы валют, которые бот может автоматически сопоставлять с текстовым запросом
+    private static final Map<String, String> currencyAliases = new HashMap<>();
+
+    static {
+        currencyAliases.put("доллар", "usd-rub");
+        currencyAliases.put("евро", "eur-rub");
+        currencyAliases.put("юань", "cny-rub");
+        currencyAliases.put("тенге", "kzt-rub");
+        currencyAliases.put("иена", "jpy-rub");
+    }
+
+    // Валюта по умолчанию для команды /compare
+    private static final String DEFAULT_COMPARE_CURRENCY = "usd-rub";
 
     @Override
     public String getBotUsername() {
@@ -45,15 +61,16 @@ public class MyTelegramBot extends TelegramLongPollingBot {
         }
     }
 
-
-
     private void handleCurrency(long chatId, String currencyPair) {
         String[] rate = getExchangeRate(currencyPair);
         if (rate != null && rate.length >= 2) {
             if (rate[0].toLowerCase().contains("ошибка") || rate[0].toLowerCase().contains("404") || rate[1].toLowerCase().contains("ошибка") || rate[1].toLowerCase().contains("404")) {
                 sendMessage(chatId, "Извините, нету курса для " + currencyPair);
             } else {
-                sendMessage(chatId, "Курс " + currencyPair.toUpperCase() + ": " + rate[0] + "\nИзменение: " + rate[1] + "\n😇");
+                double change = parseChange(rate[1]);
+                String trendEmoji = getTrendEmoji(change);
+
+                sendMessage(chatId, "Курс " + currencyPair.toUpperCase() + ": " + rate[0] + "\nИзменение: " + rate[1] + trendEmoji + "\n" + getCurrencyEmoji(currencyPair));
             }
         }else {
             sendMessage(chatId, "Извините, нету курса для " + currencyPair);
@@ -65,12 +82,12 @@ public class MyTelegramBot extends TelegramLongPollingBot {
         if (update.hasMessage() && update.getMessage().hasText()) {
             String messageText = update.getMessage().getText().toLowerCase();
             long chatId = update.getMessage().getChatId();
-            if (messageText.equals("/usd") || messageText.equals("доллар")) {
+            if (messageText.equals("/start")) {
+                sendMessage(chatId, "👋Привет я бот для просмотра курса 💲 и 💶. Используй /help, чтобы узнать, что я умею!");
+            } else if (messageText.equals("/usd") || messageText.equals("доллар")) {
                 handleCurrency(chatId, "usd-rub");
-            } else if (messageText.equals("/start")) {
-                sendMessage(chatId, "👋Привет я бот для просмотра курса 💲 и 💶");
             } else if (messageText.equals("/help") || messageText.equals("помощь")) {
-                sendMessage(chatId, "(●'◡'●)Доступные команды:\n/usd - курс USD/RUB✌️\n/eur - курс EUR/RUB✌️\n/cny - курс CNY/RUB✌️\n/kzt - курс KZT/RUB✌️\n/jpy - курс JPY/RUB✌️\n/track - отслеживать курс (пример: /track usd, eur)\n/stop - остановить отслеживание");
+                sendMessage(chatId, "(●'◡'●)Доступные команды:\n/usd - курс USD/RUB✌️\n/eur - курс EUR/RUB✌️\n/cny - курс CNY/RUB✌️\n/kzt - курс KZT/RUB✌️\n/jpy - курс JPY/RUB✌️\n/all - показать курсы всех доступных валют");
             } else if (messageText.equals("/kzt") || messageText.equals("тенге")){
                 handleCurrency(chatId, "kzt-rub");
             } else if (messageText.equals("/jpy") || messageText.equals("иена")) {
@@ -79,10 +96,19 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                 handleCurrency(chatId, "eur-rub");
             } else if (messageText.equals("/cny") || messageText.equals("юань")) {
                 handleCurrency(chatId, "cny-rub");
-            }
-
-            else {
+            } else if (messageText.equals("/all")) {
+                handleAllCurrencies(chatId);
+            } else if (messageText.matches("^[a-zA-Z]{3}-[a-zA-Z]{3}$")) {
                 handleCurrency(chatId, messageText);
+            }
+            else {
+                // Проверяем, является ли сообщение алиасом валюты (например, "доллар" -> "usd-rub")
+                String currencyPair = currencyAliases.get(messageText);
+                if (currencyPair != null) {
+                    handleCurrency(chatId, currencyPair);
+                } else {
+                    sendMessage(chatId, "Не понимаю запрос. Попробуйте /help.");
+                }
             }
         }
     }
@@ -97,5 +123,62 @@ public class MyTelegramBot extends TelegramLongPollingBot {
             e.printStackTrace();
         }
     }
-}
 
+    private String getCurrencyEmoji(String currencyPair) {
+        String currencyCode = currencyPair.substring(0, 3).toUpperCase();
+        switch (currencyCode) {
+            case "USD":
+                return "🤑 (США)";
+            case "EUR":
+                return "🇪🇺 (Евросоюз)";
+            case "CNY":
+                return "🇨🇳 (Китай)";
+            case "KZT":
+                return "🇰🇿 (Казахстан)";
+            case "JPY":
+                return "🇯🇵 (Япония)";
+            default:
+                return "💰"; // Общий значок валюты
+        }
+    }
+
+    private double parseChange(String changeText) {
+        try {
+            // Убираем символ процента и преобразуем в double
+            return Double.parseDouble(changeText.replace("%", ""));
+        } catch (NumberFormatException e) {
+            return 0.0; // Если не удалось распарсить, возвращаем 0
+        }
+    }
+
+    private String getTrendEmoji(double change) {
+        if (change > 0) {
+            return " 📈"; // Растет
+        } else if (change < 0) {
+            return " 📉"; // Падает
+        } else {
+            return " ➡️"; // Без изменений
+        }
+    }
+
+    private void handleAllCurrencies(long chatId) {
+        StringBuilder sb = new StringBuilder();
+        for (String currency : currencyAliases.values()) {
+            String[] rate = getExchangeRate(currency);
+            if (rate != null && rate.length >= 2) {
+                if (!rate[0].toLowerCase().contains("ошибка") && !rate[0].toLowerCase().contains("404") && !rate[1].toLowerCase().contains("ошибка") && !rate[1].toLowerCase().contains("404")) {
+                    double change = parseChange(rate[1]);
+                    String trendEmoji = getTrendEmoji(change);
+                    sb.append("Курс ").append(currency.toUpperCase()).append(": ").append(rate[0]).append("\n");
+                    sb.append("Изменение: ").append(rate[1]).append(trendEmoji).append("\n");
+                    sb.append(getCurrencyEmoji(currency)).append("\n\n");
+                }
+            }
+        }
+        if (sb.length() > 0) {
+            sendMessage(chatId, sb.toString());
+        } else {
+            sendMessage(chatId, "Не удалось получить курсы валют.");
+        }
+    }
+}
